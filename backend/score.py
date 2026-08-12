@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import List
 
@@ -145,6 +146,143 @@ app.add_middleware(
 )
 app.add_middleware(SessionMiddleware, secret_key=os.urandom(24))
 app.add_api_route("/health", health([healthy_condition, healthy]))
+
+
+def _env_neo4j_credentials() -> Neo4jCredentials:
+    return Neo4jCredentials(
+        uri=get_value_from_env("NEO4J_URI", "", str),
+        userName=get_value_from_env("NEO4J_USERNAME", "", str),
+        password=get_value_from_env("NEO4J_PASSWORD", "", str),
+        database=get_value_from_env("NEO4J_DATABASE", "neo4j", str),
+    )
+
+
+def _graph_builder_node_name(node: dict) -> str:
+    properties = node.get("properties") or {}
+    return str(
+        properties.get("name")
+        or properties.get("id")
+        or properties.get("fileName")
+        or properties.get("text")
+        or node.get("element_id")
+        or ""
+    ).strip()
+
+
+def _graph_builder_node_type(node: dict) -> str:
+    labels = node.get("labels") or []
+    if not labels:
+        return "Node"
+    return str(labels[0])
+
+
+def _normalize_graph_builder_result(raw_graph: dict, job_name: str, source_file: str) -> dict:
+    raw_nodes = raw_graph.get("nodes") or []
+    raw_relationships = raw_graph.get("relationships") or raw_graph.get("edges") or []
+    nodes = []
+    id_to_name = {}
+
+    for node in raw_nodes:
+        node_id = str(node.get("element_id") or node.get("id") or _graph_builder_node_name(node))
+        name = _graph_builder_node_name(node)
+        if not node_id or not name:
+            continue
+        id_to_name[node_id] = name
+        nodes.append(
+            {
+                "id": node_id,
+                "name": name,
+                "label": name,
+                "type": _graph_builder_node_type(node),
+                "description": str((node.get("properties") or {}).get("description") or ""),
+            }
+        )
+
+    edges = []
+    for relationship in raw_relationships:
+        source = str(relationship.get("start_node_element_id") or relationship.get("source") or "")
+        target = str(relationship.get("end_node_element_id") or relationship.get("target") or "")
+        if not source or not target:
+            continue
+        edges.append(
+            {
+                "source": id_to_name.get(source, source),
+                "target": id_to_name.get(target, target),
+                "label": str(relationship.get("type") or relationship.get("label") or "RELATED"),
+            }
+        )
+
+    return {
+        "job": job_name,
+        "sourceFile": source_file,
+        "nodes": nodes,
+        "edges": edges,
+    }
+
+
+@app.post("/build-graph")
+async def build_graph_for_zhiyinxing(
+    file: UploadFile = File(...),
+    jobName: str = Form("软件测试工程师"),
+    targetScene: str = Form("企业岗位能力材料"),
+    model: str = Form("ollama_qwen3_8b"),
+    token_chunk_size: int = Form(10000),
+    chunk_overlap: int = Form(20),
+    chunks_to_combine: int = Form(1),
+    additional_instructions: str = Form("请围绕职业教育岗位能力图谱抽取岗位、任务、能力、知识、技能、课程、实训及证据。"),
+):
+    """Adapter endpoint for Zhiyinxing.
+
+    It wraps the original upload/extract/query flow into one endpoint:
+    file -> LLM graph extraction -> Neo4j -> normalized nodes/edges.
+    """
+    credentials = _env_neo4j_credentials()
+    credentials.validate_required()
+
+    source_file = sanitize_filename(file.filename or f"enterprise-material-{uuid.uuid4().hex}.txt")
+    upload_id = uuid.uuid4().hex
+    graph = create_graph_database_connection(credentials)
+
+    params = SourceScanExtractParams(
+        model=model,
+        source_type="local file",
+        file_name=source_file,
+        token_chunk_size=token_chunk_size,
+        chunk_overlap=chunk_overlap,
+        chunks_to_combine=chunks_to_combine,
+        additional_instructions=f"{additional_instructions}\n目标场景：{targetScene}\n目标岗位：{jobName}",
+        embedding_provider=get_value_from_env("EMBEDDING_PROVIDER", "sentence-transformer", str),
+        embedding_model=get_value_from_env("EMBEDDING_MODEL", "all-MiniLM-L6-v2", str),
+    )
+
+    try:
+        await asyncio.to_thread(
+            upload_file,
+            graph,
+            model,
+            file,
+            1,
+            1,
+            source_file,
+            credentials.uri,
+            CHUNK_DIR,
+            MERGED_DIR,
+            upload_id,
+        )
+        merged_file_path = validate_file_path(MERGED_DIR, source_file)
+        await extract_graph_from_file_local_file(credentials, params, merged_file_path)
+        raw_graph = await asyncio.to_thread(get_graph_results, credentials, json.dumps([source_file]))
+        return _normalize_graph_builder_result(raw_graph, jobName, source_file)
+    except Exception as error:
+        logging.exception("Zhiyinxing build-graph failed")
+        return create_api_response(
+            "Failed",
+            message="GraphRAG build-graph failed",
+            error=str(error),
+            file_name=source_file,
+        )
+    finally:
+        gc.collect()
 
 
 @app.get("/verify_auth")
