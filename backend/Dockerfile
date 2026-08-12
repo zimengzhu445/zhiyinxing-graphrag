@@ -39,4 +39,4 @@ RUN python -m nltk.downloader -d /usr/local/nltk_data averaged_perceptron_tagger
 # Copy application code
 COPY . /code
 # Set command
-CMD ["gunicorn", "score:app", "--workers", "8","--threads", "8", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--timeout", "300"]
+CMD ["gunicorn", "score:app", "--workers", "1","--threads", "2", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--timeout", "300"]
