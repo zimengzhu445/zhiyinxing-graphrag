@@ -19,6 +19,10 @@ from src.shared.llm_graph_builder_exception import LLMGraphBuilderException
 import re
 from langchain_core.callbacks.manager import CallbackManager
 from src.shared.common_fn import UniversalTokenUsageHandler,get_value_from_env
+class FunctionCallingChatOpenAI(ChatOpenAI):
+    def with_structured_output(self, schema=None, **kwargs):
+        kwargs["method"] = "function_calling"
+        return super().with_structured_output(schema, **kwargs)
 
 def get_llm(model: str):
     """Retrieve the specified language model based on the model name."""
@@ -128,16 +132,32 @@ def get_llm(model: str):
                 extract_types=["entities", "facts"],
             )
             callback_handler = None
-        
-        else: 
+        elif "DEEPSEEK" in model:
             model_name, api_endpoint, api_key = env_value.split(",")
-            llm = ChatOpenAI(
+
+            llm = FunctionCallingChatOpenAI(
                 api_key=api_key,
                 base_url=api_endpoint,
                 model=model_name,
                 temperature=0,
                 callbacks=callback_manager,
+                extra_body={
+                     "thinking": {
+                        "type": "disabled"
+                     }
+                },
             )
+
+        else:
+         model_name, api_endpoint, api_key = env_value.split(",")
+         llm = ChatOpenAI(
+            api_key=api_key,
+            base_url=api_endpoint,
+            model=model_name,
+        temperature=0,
+        callbacks=callback_manager,
+        )
+        
     except Exception as e:
         err = f"Error while creating LLM '{model}': {str(e)}"
         logging.error(err)

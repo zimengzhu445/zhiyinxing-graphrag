@@ -225,7 +225,7 @@ async def build_graph_for_zhiyinxing(
     file: UploadFile = File(...),
     jobName: str = Form("软件测试工程师"),
     targetScene: str = Form("企业岗位能力材料"),
-    model: str = Form("ollama_qwen3_8b"),
+    model: str = Form("deepseek_v4_flash"),
     token_chunk_size: int = Form(10000),
     chunk_overlap: int = Form(20),
     chunks_to_combine: int = Form(1),
