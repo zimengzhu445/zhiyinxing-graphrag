@@ -219,46 +219,57 @@ async def get_graph_document_list(
         additional_instructions = sanitize_additional_instruction(additional_instructions)
     graph_document_list = []
     token_usage = 0
+    max_attempts = 3
+    retry_instructions = (
+        "\n空图重试要求：必须至少抽取 1 个岗位节点，并必须抽取能力节点；"
+        "尽可能抽取任务、知识、技能、课程、工具、实训；节点类型只能来自 allowed_nodes；"
+        "关系只能来自 allowed_relationships；不允许返回空图。"
+    )
     try:
-        if "diffbot_api_key" in dir(llm):
-            llm_transformer = llm
-        else:
-            try:
-                llm.with_structured_output(_Graph)
-                supports_structured_output = True
-            except Exception:
-                supports_structured_output = False
-            if supports_structured_output and not isinstance(llm, ChatGroq):
-                logging.info("LLM supports structured output; including descriptions in graph")
-                node_properties = ["description"]
-                relationship_properties = ["description"]
-                ignore_tool_usage = False
+        for attempt in range(1, max_attempts + 1):
+            logging.info("Graph extraction attempt %d/%d", attempt, max_attempts)
+            attempt_instructions = (additional_instructions or "") + (retry_instructions if attempt > 1 else "")
+            if "diffbot_api_key" in dir(llm):
+                llm_transformer = llm
             else:
-                logging.info("LLM does not support structured output; excluding descriptions in graph") 
-                node_properties = False
-                relationship_properties = False
-                ignore_tool_usage = True
-            
-            llm_transformer = LLMGraphTransformer(
-                llm=llm,
-                node_properties=node_properties,
-                relationship_properties=relationship_properties,
-                allowed_nodes=allowedNodes,
-                allowed_relationships=allowedRelationship,
-                ignore_tool_usage=ignore_tool_usage,
-                additional_instructions=ADDITIONAL_INSTRUCTIONS+ (additional_instructions if additional_instructions else "")
+                try:
+                    llm.with_structured_output(_Graph)
+                    supports_structured_output = True
+                except Exception:
+                    supports_structured_output = False
+                if supports_structured_output and not isinstance(llm, ChatGroq):
+                    node_properties = ["description"]
+                    relationship_properties = ["description"]
+                    ignore_tool_usage = False
+                else:
+                    node_properties = False
+                    relationship_properties = False
+                    ignore_tool_usage = True
+                llm_transformer = LLMGraphTransformer(
+                    llm=llm,
+                    node_properties=node_properties,
+                    relationship_properties=relationship_properties,
+                    allowed_nodes=allowedNodes,
+                    allowed_relationships=allowedRelationship,
+                    ignore_tool_usage=ignore_tool_usage,
+                    additional_instructions=ADDITIONAL_INSTRUCTIONS + attempt_instructions,
+                )
+
+            logging.info(
+                "Invoking LLM Graph Transformer: allowed_nodes=%s allowed_relationships=%s schema_instructions=%s",
+                allowedNodes, allowedRelationship, bool(attempt_instructions),
             )
-        
-        logging.info(
-            "Invoking LLM Graph Transformer: allowed_nodes=%s allowed_relationships=%s schema_instructions=%s",
-            allowedNodes,
-            allowedRelationship,
-            bool(additional_instructions),
-        )
-        if isinstance(llm,DiffbotGraphTransformer):
-            graph_document_list = llm_transformer.convert_to_graph_documents(combined_chunk_document_list)
-        else:
-            graph_document_list = await llm_transformer.aconvert_to_graph_documents(combined_chunk_document_list)
+            if isinstance(llm, DiffbotGraphTransformer):
+                graph_document_list = llm_transformer.convert_to_graph_documents(combined_chunk_document_list)
+            else:
+                graph_document_list = await llm_transformer.aconvert_to_graph_documents(combined_chunk_document_list)
+            node_count = sum(len(getattr(doc, "nodes", []) or []) for doc in graph_document_list)
+            relationship_count = sum(len(getattr(doc, "relationships", []) or []) for doc in graph_document_list)
+            logging.info("Extracted nodes: %d", node_count)
+            logging.info("Extracted relationships: %d", relationship_count)
+            if node_count > 0 or attempt == max_attempts:
+                break
+            logging.warning("Graph extraction returned empty nodes; retrying with stronger instructions")
     except Exception as e:
        logging.error(f"Error in graph transformation: {e}", exc_info=True)
        raise LLMGraphBuilderException(f"Graph transformation failed: {str(e)}")
@@ -275,6 +286,8 @@ async def get_graph_document_list(
     logging.info("Generated graph documents: %d", len(graph_document_list))
     logging.info("Extracted nodes: %d", node_count)
     logging.info("Extracted relationships: %d", relationship_count)
+    if node_count == 0:
+        raise LLMGraphBuilderException("Graph extraction returned no entities after retries")
     return graph_document_list, token_usage
 
 async def get_graph_from_llm(model, chunkId_chunkDoc_list, allowedNodes, allowedRelationship, chunks_to_combine, additional_instructions=None):
