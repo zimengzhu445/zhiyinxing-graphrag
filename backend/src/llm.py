@@ -249,6 +249,12 @@ async def get_graph_document_list(
                 additional_instructions=ADDITIONAL_INSTRUCTIONS+ (additional_instructions if additional_instructions else "")
             )
         
+        logging.info(
+            "Invoking LLM Graph Transformer: allowed_nodes=%s allowed_relationships=%s schema_instructions=%s",
+            allowedNodes,
+            allowedRelationship,
+            bool(additional_instructions),
+        )
         if isinstance(llm,DiffbotGraphTransformer):
             graph_document_list = llm_transformer.convert_to_graph_documents(combined_chunk_document_list)
         else:
@@ -264,6 +270,11 @@ async def get_graph_document_list(
         except Exception as usage_err:
             logging.error(f"Error while reporting token usage: {usage_err}")
 
+    node_count = sum(len(getattr(doc, "nodes", []) or []) for doc in graph_document_list)
+    relationship_count = sum(len(getattr(doc, "relationships", []) or []) for doc in graph_document_list)
+    logging.info("Generated graph documents: %d", len(graph_document_list))
+    logging.info("Extracted nodes: %d", node_count)
+    logging.info("Extracted relationships: %d", relationship_count)
     return graph_document_list, token_usage
 
 async def get_graph_from_llm(model, chunkId_chunkDoc_list, allowedNodes, allowedRelationship, chunks_to_combine, additional_instructions=None):
@@ -305,7 +316,7 @@ async def get_graph_from_llm(model, chunkId_chunkDoc_list, allowedNodes, allowed
            callback_handler,
            additional_instructions,
        )
-       logging.info(f"Generated {len(graph_document_list)} graph documents")
+       logging.info(f"Generated graph documents: {len(graph_document_list)}")
        return graph_document_list, token_usage
    except Exception as e:
        logging.error(f"Error in get_graph_from_llm: {e}", exc_info=True)

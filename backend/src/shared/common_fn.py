@@ -279,10 +279,33 @@ def load_embedding_model(embedding_provider: str, embedding_model_name: str):
     return embeddings, dimension
 
 def save_graphDocuments_in_neo4j(graph: Neo4jGraph, graph_document_list: List[GraphDocument], max_retries=3, delay=1):
+   if not graph_document_list:
+       raise LLMGraphBuilderException("No graph documents to write")
+   logging.info("Writing %d graph documents to Neo4j database=%s", len(graph_document_list), getattr(graph, "_database", None))
    retries = 0
    while retries < max_retries:
        try:
            graph.add_graph_documents(graph_document_list, baseEntityLabel=True)
+           # Keep the existing Chinese schema while exposing stable English labels
+           # used by the Zhiyinxing API/verification queries.
+           graph.query(
+               """
+               MATCH (n)
+               WHERE n:`岗位` OR n:`能力` OR n:`技能` OR n:`知识` OR n:`任务`
+                  OR n:`课程` OR n:`实训` OR n:`工具`
+               SET n.name = coalesce(n.name, n.id)
+               FOREACH (_ IN CASE WHEN n:`岗位` THEN [1] ELSE [] END | SET n:Job)
+               FOREACH (_ IN CASE WHEN n:`能力` THEN [1] ELSE [] END | SET n:Ability)
+               FOREACH (_ IN CASE WHEN n:`技能` THEN [1] ELSE [] END | SET n:Skill)
+               FOREACH (_ IN CASE WHEN n:`知识` THEN [1] ELSE [] END | SET n:Knowledge)
+               FOREACH (_ IN CASE WHEN n:`任务` THEN [1] ELSE [] END | SET n:Task)
+               FOREACH (_ IN CASE WHEN n:`课程` THEN [1] ELSE [] END | SET n:Course)
+               FOREACH (_ IN CASE WHEN n:`实训` THEN [1] ELSE [] END | SET n:Training)
+               FOREACH (_ IN CASE WHEN n:`工具` THEN [1] ELSE [] END | SET n:Tool)
+               """,
+               session_params={"database": getattr(graph, "_database", None)},
+           )
+           logging.info("Write completed")
            return
        except TransientError as e:
            if "DeadlockDetected" in str(e):

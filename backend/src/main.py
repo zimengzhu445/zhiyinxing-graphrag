@@ -658,10 +658,30 @@ async def processing_chunks(chunkId_chunkDoc_list,graph,credentials,file_name,mo
   logging.info(f'Time taken to extract enitities from LLM Graph Builder: {elapsed_entity_extraction:.2f} seconds')
   latency_processing_chunk["entity_extraction"] = f'{elapsed_entity_extraction:.2f}'
   
+  extracted_nodes = sum(len(getattr(doc, "nodes", []) or []) for doc in graph_documents)
+  extracted_relationships = sum(len(getattr(doc, "relationships", []) or []) for doc in graph_documents)
+  logging.info("Generated graph documents: %d", len(graph_documents))
+  logging.info("Extracted nodes: %d", extracted_nodes)
+  logging.info("Extracted relationships: %d", extracted_relationships)
+  if not graph_documents or extracted_nodes == 0:
+    raise LLMGraphBuilderException(
+        "Graph extraction returned no entities; document was not marked Completed"
+    )
+
   cleaned_graph_documents = handle_backticks_nodes_relationship_id_type(graph_documents)
+  cleaned_nodes = sum(len(getattr(doc, "nodes", []) or []) for doc in cleaned_graph_documents)
+  cleaned_relationships = sum(len(getattr(doc, "relationships", []) or []) for doc in cleaned_graph_documents)
+  logging.info("Extracted nodes after normalization: %d", cleaned_nodes)
+  logging.info("Extracted relationships after normalization: %d", cleaned_relationships)
+  if cleaned_nodes == 0:
+    raise LLMGraphBuilderException(
+        "Graph extraction produced no valid nodes after normalization; document was not marked Completed"
+    )
   
   start_save_graphDocuments = time.time()
+  logging.info("Writing graph documents to Neo4j (database=%s)", getattr(graph, "_database", None))
   save_graphDocuments_in_neo4j(graph, cleaned_graph_documents)
+  logging.info("Write completed")
   end_save_graphDocuments = time.time()
   elapsed_save_graphDocuments = end_save_graphDocuments - start_save_graphDocuments
   logging.info(f'Time taken to save graph document in neo4j: {elapsed_save_graphDocuments:.2f} seconds')

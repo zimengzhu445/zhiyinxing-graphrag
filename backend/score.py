@@ -339,6 +339,14 @@ async def build_graph_for_zhiyinxing(
         return _normalize_graph_builder_result(raw_graph, jobName, source_file)
     except Exception as error:
         logging.exception("Zhiyinxing build-graph failed")
+        try:
+            graphDBdataAccess(graph).update_exception_db(
+                source_file,
+                f"GraphRAG build-graph failed: {error}",
+                None,
+            )
+        except Exception:
+            logging.exception("Failed to mark build-graph document as Failed")
         return create_api_response(
             "Failed",
             message="GraphRAG build-graph failed",
@@ -506,8 +514,7 @@ async def extract_knowledge_graph_from_file(
         if params.source_type == 'local file':
             failed_file_process(credentials.uri,params.file_name, merged_file_path)
         node_detail = graphDb_data_Access.get_current_status_document_node(params.file_name)
-        # Set the status "Completed" in logging becuase we are treating these error already handled by application as like custom errors.
-        json_obj = {'api_name':'extract','message':error_message,'file_created_at':formatted_time(node_detail[0]['created_time']),'error_message':error_message, 'filename': params.file_name,'status':'Completed',
+        json_obj = {'api_name':'extract','message':error_message,'file_created_at':formatted_time(node_detail[0]['created_time']),'error_message':error_message, 'filename': params.file_name,'status':'Failed',
                     'db_url':credentials.uri,'model': params.model, 'userName':credentials.userName, 'database':credentials.database,'failed_count':1, 'source_type': params.source_type, 'source_url':params.source_url, 'wiki_query':params.wiki_query, 'logging_time': formatted_time(datetime.now(timezone.utc)),'email':credentials.email}
         if "Token usage limit exceeded" in error_message:
             logger.log_struct(json_obj, "WARNING")
