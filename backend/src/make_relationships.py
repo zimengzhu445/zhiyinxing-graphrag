@@ -57,7 +57,14 @@ def create_chunk_embeddings(graph, chunkId_chunkDoc_list, file_name, embedding_p
     """       
     execute_graph_query(graph,query_to_create_embedding, params={"fileName":file_name, "data":data_for_query})
     
-def create_relation_between_chunks(graph, file_name, chunks: List[Document])->list:
+def create_relation_between_chunks(
+    graph,
+    file_name,
+    chunks: List[Document],
+    source_id=None,
+    source_type=None,
+    source_title=None,
+)->list:
     logging.info("creating FIRST_CHUNK and NEXT_CHUNK relationships between chunks")
     current_chunk_id = ""
     lst_chunks_including_hash = []
@@ -86,6 +93,9 @@ def create_relation_between_chunks(graph, file_name, chunks: List[Document])->li
             "position": position,
             "length": chunk_document.metadata["length"],
             "f_name": file_name,
+            "source_id": source_id,
+            "source_type": source_type,
+            "source_title": source_title,
             "previous_id" : previous_chunk_id,
             "content_offset" : offset
         }
@@ -114,7 +124,11 @@ def create_relation_between_chunks(graph, file_name, chunks: List[Document])->li
     query_to_create_chunk_and_PART_OF_relation = """
         UNWIND $batch_data AS data
         MERGE (c:Chunk {id: data.id})
-        SET c.text = data.pg_content, c.position = data.position, c.length = data.length, c.fileName=data.f_name, c.content_offset=data.content_offset
+        SET c.text = data.pg_content, c.position = data.position, c.length = data.length,
+            c.fileName=data.f_name, c.content_offset=data.content_offset,
+            c.source_id=coalesce(data.source_id, c.source_id),
+            c.source_type=coalesce(data.source_type, c.source_type),
+            c.source_title=coalesce(data.source_title, c.source_title)
         WITH data, c
         SET c.page_number = CASE WHEN data.page_number IS NOT NULL THEN data.page_number END,
             c.start_time = CASE WHEN data.start_time IS NOT NULL THEN data.start_time END,

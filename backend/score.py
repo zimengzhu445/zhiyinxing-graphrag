@@ -170,10 +170,19 @@ def _graph_builder_node_name(node: dict) -> str:
 
 
 def _graph_builder_node_type(node: dict) -> str:
-    labels = node.get("labels") or []
+    labels = [str(label) for label in (node.get("labels") or []) if str(label) != "__Entity__"]
     if not labels:
         return "Node"
-    return str(labels[0])
+    # Neo4j does not guarantee label order. Prefer the domain label over
+    # generated English aliases so the API remains stable for the frontend.
+    preferred_labels = (
+        "产业链", "岗位群", "岗位", "任务", "能力", "能力单元", "技能", "知识",
+        "课程", "实训", "工具",
+    )
+    for label in preferred_labels:
+        if label in labels:
+            return label
+    return labels[0]
 
 
 def _normalize_graph_builder_result(raw_graph: dict, job_name: str, source_file: str) -> dict:
@@ -221,33 +230,51 @@ def _normalize_graph_builder_result(raw_graph: dict, job_name: str, source_file:
 
 # ===== 职引星岗位能力图谱 Schema =====
 
-ZHIYINXING_ALLOWED_NODES = (
-    "岗位,任务,能力,知识,技能,课程,实训,工具"
+ZHIYINXING_NODE_TYPES = (
+    "产业链", "岗位群", "岗位", "任务", "能力", "能力单元", "技能", "知识", "课程", "实训", "工具"
 )
 
-ZHIYINXING_ALLOWED_RELATIONSHIPS = ",".join([
-    "岗位", "包含任务", "任务",
-    "岗位", "需要能力", "能力",
-    "任务", "需要能力", "能力",
-    "能力", "需要知识", "知识",
-    "能力", "需要技能", "技能",
-    "能力", "关联课程", "课程",
-    "能力", "关联实训", "实训",
-    "能力", "使用工具", "工具",
-    "技能", "使用工具", "工具",
-    "任务", "使用工具", "工具",
-])
+ZHIYINXING_RELATION_TRIPLETS = (
+    ("产业链", "包含岗位群", "岗位群"),
+    ("岗位群", "包含岗位", "岗位"),
+    ("岗位", "包含任务", "任务"),
+    ("岗位", "需要能力", "能力"),
+    ("任务", "需要能力", "能力"),
+    # Legacy edges retained for existing graphs and queries.
+    ("能力", "需要知识", "知识"),
+    ("能力", "需要技能", "技能"),
+    ("能力", "包含能力单元", "能力单元"),
+    ("能力单元", "需要技能", "技能"),
+    ("能力单元", "需要知识", "知识"),
+    ("能力", "关联课程", "课程"),
+    ("能力", "关联实训", "实训"),
+    ("能力", "使用工具", "工具"),
+    ("技能", "使用工具", "工具"),
+    ("任务", "使用工具", "工具"),
+)
+
+ZHIYINXING_ALLOWED_NODES = ",".join(ZHIYINXING_NODE_TYPES)
+ZHIYINXING_ALLOWED_RELATIONSHIPS = ",".join(
+    value for triplet in ZHIYINXING_RELATION_TRIPLETS for value in triplet
+)
 
 ZHIYINXING_SCHEMA_INSTRUCTIONS = """
 你正在构建职业教育岗位能力图谱。
 
+必须按照以下职业教育逻辑组织信息：
+产业链 → 岗位群 → 岗位 → 典型工作任务 → 岗位能力 → 能力单元 → 技能点/知识点。
+
 严格遵守以下节点语义：
+
+产业链：人工智能产业链中的产业方向或环节，例如“人工智能产业”。
+岗位群：相关职业岗位的集合，例如“人工智能技术应用专业群”。
 
 岗位：企业招聘岗位，例如“软件测试工程师”。
 任务：岗位中的具体工作任务，例如“用户登录接口测试”。
 能力：完成任务所需的综合职业能力，例如“接口测试能力”。
-知识：完成任务需要理解的理论、概念和规范，例如“HTTP状态码”“接口鉴权”。
-技能：可操作、可训练、可评价的技术技能，例如“接口用例设计”“边界值分析”。
+能力单元：一级能力下可以进一步教学、训练和评价的具体能力，例如“接口测试方案设计能力”。
+技能：完成任务需要掌握的操作性技能点，例如“接口用例设计”“边界值分析”。
+知识：支撑能力和技能的理论或概念性知识点，例如“HTTP状态码”“接口鉴权”。
 课程：培养相关能力的课程，例如“软件测试技术”。
 实训：学生可执行的实践任务，例如“登录接口测试方案设计与缺陷提交”。
 工具：完成任务或技能使用的软件、平台或框架，例如“Postman”“Selenium”。
@@ -255,10 +282,13 @@ ZHIYINXING_SCHEMA_INSTRUCTIONS = """
 特别注意：
 1. “接口测试”“功能测试”“自动化测试”如果描述的是能力要求，优先抽取为“能力”，不要简单全部归为“任务”。
 2. “用户登录接口测试”“测试方案设计”“缺陷提交”等具体工作活动归为“任务”或“实训”。
-3. 不要创建“掌握”“需要掌握”等新的关系名称，只使用规定的关系类型。
-4. 不要创建允许范围之外的业务节点类型。
-5. 不要为了补全图谱凭空捏造材料中完全没有依据的内容。
-6. 同一概念尽量统一名称，避免生成同义重复节点。
+3. 任务必须表示材料中真实存在的工作活动，而不是抽象能力或任职要求。
+4. 能力表示完成一类工作任务所需的综合能力；能力单元表示可以进一步教学、训练和评价的具体能力。
+5. 不要创建“掌握”“需要掌握”等新的关系名称，只使用规定的关系类型。
+6. 不要创建允许范围之外的业务节点类型。
+7. 不要为了补全图谱凭空捏造输入材料中不存在的信息。
+8. 同一概念尽量统一名称，避免生成同义重复节点。
+9. 如果请求上下文没有提供产业链或岗位群，不得从单份企业材料猜测或杜撰它们。
 """
 
 @app.post("/build-graph")
@@ -266,6 +296,11 @@ async def build_graph_for_zhiyinxing(
     file: UploadFile = File(...),
     jobName: str = Form("软件测试工程师"),
     targetScene: str = Form("企业岗位能力材料"),
+    industryChain: str | None = Form(None),
+    professionalGroup: str | None = Form(None),
+    source_id: str | None = Form(None),
+    source_type: str | None = Form(None),
+    source_title: str | None = Form(None),
     model: str = Form("deepseek_v4_flash"),
     token_chunk_size: int = Form(10000),
     chunk_overlap: int = Form(20),
@@ -281,12 +316,20 @@ async def build_graph_for_zhiyinxing(
     credentials.validate_required()
 
     source_file = sanitize_filename(file.filename or f"enterprise-material-{uuid.uuid4().hex}.txt")
+    industryChain = industryChain.strip() if industryChain and industryChain.strip() else None
+    professionalGroup = professionalGroup.strip() if professionalGroup and professionalGroup.strip() else None
+    source_id = source_id.strip() if source_id and source_id.strip() else None
+    source_type = source_type.strip() if source_type and source_type.strip() else None
+    source_title = source_title.strip() if source_title and source_title.strip() else None
     upload_id = uuid.uuid4().hex
     graph = create_graph_database_connection(credentials)
 
     params = SourceScanExtractParams(
     model=model,
     source_type="local file",
+    source_metadata_type=source_type,
+    source_id=source_id,
+    source_title=source_title,
     file_name=source_file,
 
     token_chunk_size=token_chunk_size,
@@ -302,6 +345,11 @@ async def build_graph_for_zhiyinxing(
 
     目标场景：{targetScene}
     目标岗位：{jobName}
+    请求上下文（仅作为构图约束和外部元数据，不代表企业材料中的事实）：
+    - 产业链：{industryChain or '未提供；不得猜测或创建产业链节点'}
+    - 岗位群：{professionalGroup or '未提供；不得猜测或创建岗位群节点'}
+    - 如果提供产业链和岗位群，允许使用它们构建“产业链-包含岗位群->岗位群”和“岗位群-包含岗位->岗位”；
+      如果未提供，则不要凭空补全这两类节点。
 
     补充抽取要求：
     {additional_instructions}

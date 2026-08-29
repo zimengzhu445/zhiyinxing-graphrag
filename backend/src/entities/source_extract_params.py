@@ -11,6 +11,9 @@ class SourceScanExtractParams(BaseModel):
     gcs_bucket_name: Optional[str] = Field(None, description="GCS bucket name")
     gcs_bucket_folder: Optional[str] = Field(None, description="GCS bucket folder")
     source_type: Optional[str] = Field(None, description="Source type")
+    source_metadata_type: Optional[str] = Field(None, description="Knowledge source type")
+    source_id: Optional[str] = Field(None, description="Stable knowledge source id")
+    source_title: Optional[str] = Field(None, description="Knowledge source title")
     gcs_project_id: Optional[str] = Field(None, description="GCS project ID")
     access_token: Optional[str] = Field(None, description="Access token")
     gcs_blob_filename: Optional[str] = Field(None, description="GCS blob filename")
@@ -35,6 +38,9 @@ def get_source_scan_extract_params(
     gcs_bucket_name: Optional[str] = Form(None),
     gcs_bucket_folder: Optional[str] = Form(None),
     source_type: Optional[str] = Form(None),
+    source_metadata_type: Optional[str] = Form(None),
+    source_id: Optional[str] = Form(None),
+    source_title: Optional[str] = Form(None),
     gcs_project_id: Optional[str] = Form(None),
     access_token: Optional[str] = Form(None),
     gcs_blob_filename: Optional[str] = Form(None),
@@ -59,6 +65,9 @@ def get_source_scan_extract_params(
         gcs_bucket_name=gcs_bucket_name,
         gcs_bucket_folder=gcs_bucket_folder,
         source_type=source_type,
+        source_metadata_type=source_metadata_type,
+        source_id=source_id,
+        source_title=source_title,
         gcs_project_id=gcs_project_id,
         access_token=access_token,
         gcs_blob_filename=gcs_blob_filename,

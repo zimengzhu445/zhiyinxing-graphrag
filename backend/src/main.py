@@ -462,9 +462,27 @@ async def processing_source(credentials, params, pages, merged_file_path=None, i
   logging.info(f'Time taken database connection: {elapsed_create_connection:.2f} seconds')
   uri_latency["create_connection"] = f'{elapsed_create_connection:.2f}'
   graphDb_data_Access = graphDBdataAccess(graph)
+  if params.source_id or params.source_metadata_type or params.source_title:
+    source_metadata = sourceNode()
+    source_metadata.file_name = params.file_name
+    source_metadata.source_id = params.source_id
+    source_metadata.source_type = params.source_metadata_type
+    source_metadata.source_title = params.source_title
+    graphDb_data_Access.update_source_node(source_metadata)
   create_chunk_vector_index(graph, params.embedding_provider,params.embedding_model)
   start_get_chunkId_chunkDoc_list = time.time()
-  total_chunks, chunkId_chunkDoc_list = get_chunkId_chunkDoc_list(graph, params.file_name, pages, params.token_chunk_size, params.chunk_overlap, params.retry_condition, credentials.email)
+  total_chunks, chunkId_chunkDoc_list = get_chunkId_chunkDoc_list(
+      graph,
+      params.file_name,
+      pages,
+      params.token_chunk_size,
+      params.chunk_overlap,
+      params.retry_condition,
+      credentials.email,
+      params.source_id,
+      params.source_metadata_type,
+      params.source_title,
+  )
   end_get_chunkId_chunkDoc_list = time.time()
   elapsed_get_chunkId_chunkDoc_list = end_get_chunkId_chunkDoc_list - start_get_chunkId_chunkDoc_list
   logging.info(f'Time taken to create list chunkids with chunk document: {elapsed_get_chunkId_chunkDoc_list:.2f} seconds')
@@ -702,7 +720,18 @@ async def processing_chunks(chunkId_chunkDoc_list,graph,credentials,file_name,mo
   rel_count = count_response[file_name].get('relationshipCount',"0")
   return node_count,rel_count,latency_processing_chunk,token_usage
 
-def get_chunkId_chunkDoc_list(graph, file_name, pages, token_chunk_size, chunk_overlap, retry_condition, email):
+def get_chunkId_chunkDoc_list(
+  graph,
+  file_name,
+  pages,
+  token_chunk_size,
+  chunk_overlap,
+  retry_condition,
+  email,
+  source_id=None,
+  source_type=None,
+  source_title=None,
+):
   """
   Get chunk IDs and corresponding document chunks for a file.
 
@@ -731,7 +760,14 @@ def get_chunkId_chunkDoc_list(graph, file_name, pages, token_chunk_size, chunk_o
       pages[i]=Document(page_content=str(text), metadata=pages[i].metadata)
     create_chunks_obj = CreateChunksofDocument(pages, graph)
     chunks = create_chunks_obj.split_file_into_chunks(token_chunk_size, chunk_overlap, email)
-    chunkId_chunkDoc_list = create_relation_between_chunks(graph,file_name,chunks)
+    chunkId_chunkDoc_list = create_relation_between_chunks(
+      graph,
+      file_name,
+      chunks,
+      source_id,
+      source_type,
+      source_title,
+    )
     return len(chunks), chunkId_chunkDoc_list
   
   else:  

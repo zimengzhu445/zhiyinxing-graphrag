@@ -49,6 +49,9 @@ class graphDBdataAccess:
                             d.relationshipCount = $r_count, d.model= $model, d.gcsBucket=$gcs_bucket, 
                             d.gcsBucketFolder= $gcs_bucket_folder, d.language= $language,d.gcsProjectId= $gcs_project_id,
                             d.is_cancelled=False, d.total_chunks=0, d.processed_chunk=0,
+                            d.source_id=coalesce($source_id, d.source_id),
+                            d.source_type=coalesce($source_type, d.source_type),
+                            d.source_title=coalesce($source_title, d.source_title),
                             d.access_token=$access_token,
                             d.chunkNodeCount=$chunkNodeCount,d.chunkRelCount=$chunkRelCount,
                             d.entityNodeCount=$entityNodeCount,d.entityEntityRelCount=$entityEntityRelCount,
@@ -60,6 +63,9 @@ class graphDBdataAccess:
                             "gcs_bucket": obj_source_node.gcsBucket, "gcs_bucket_folder": obj_source_node.gcsBucketFolder, 
                             "language":obj_source_node.language, "gcs_project_id":obj_source_node.gcsProjectId,
                             "access_token":obj_source_node.access_token,
+                            "source_id":obj_source_node.source_id,
+                            "source_type":obj_source_node.source_type,
+                            "source_title":obj_source_node.source_title,
                             "chunkNodeCount":obj_source_node.chunkNodeCount,
                             "chunkRelCount":obj_source_node.chunkRelCount,
                             "entityNodeCount":obj_source_node.entityNodeCount,
@@ -118,6 +124,12 @@ class graphDBdataAccess:
 
             if obj_source_node.embedding_model is not None:
                 params['embedding_model'] = obj_source_node.embedding_model
+            if obj_source_node.source_id is not None:
+                params['source_id'] = obj_source_node.source_id
+            if obj_source_node.source_type is not None:
+                params['source_type'] = obj_source_node.source_type
+            if obj_source_node.source_title is not None:
+                params['source_title'] = obj_source_node.source_title
             param= {"props":params}
             
             logging.info(f'Base Param value 1 : {param}')

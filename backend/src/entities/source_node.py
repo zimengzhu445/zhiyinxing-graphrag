@@ -32,3 +32,6 @@ class sourceNode:
     retry_condition:str=None
     token_usage:int=None
     embedding_model:str=None
+    source_id:str=None
+    source_type:str=None
+    source_title:str=None

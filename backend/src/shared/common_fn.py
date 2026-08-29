@@ -213,7 +213,119 @@ def get_chunk_and_graphDocument(graph_document_list, chunkId_chunkDoc_list):
             lst_chunk_chunkId_document.append({'graph_doc':graph_document,'chunk_id':chunk_id})
                   
   return lst_chunk_chunkId_document  
-                 
+
+
+def _clean_source_refs(values):
+  """Normalize source/chunk references without inventing values."""
+  if values is None:
+    return []
+  if isinstance(values, (str, bytes)):
+    values = [values]
+  refs = []
+  for value in values:
+    if value is None:
+      continue
+    value = str(value).strip()
+    if value and value not in refs:
+      refs.append(value)
+  return refs
+
+
+def _bind_graph_document_sources(graph: Neo4jGraph, graph_document_list: List[GraphDocument]):
+  """Append Chunk-based provenance to entities and extracted relationships."""
+  entity_refs = {}
+  relationship_refs = {}
+
+  for graph_document in graph_document_list:
+    source = getattr(graph_document, "source", None)
+    metadata = getattr(source, "metadata", {}) or {}
+    chunk_refs = _clean_source_refs(metadata.get("combined_chunk_ids"))
+
+    for node in getattr(graph_document, "nodes", []) or []:
+      node_id = _clean_source_refs([getattr(node, "id", None)])
+      if not node_id:
+        continue
+      node_id = node_id[0]
+      entity_refs.setdefault(node_id, set()).update(chunk_refs)
+
+    for relationship in getattr(graph_document, "relationships", []) or []:
+      source_node = getattr(relationship, "source", None)
+      target_node = getattr(relationship, "target", None)
+      relation_type = _clean_source_refs([getattr(relationship, "type", None)])
+      source_node_id = _clean_source_refs([getattr(source_node, "id", None)])
+      target_node_id = _clean_source_refs([getattr(target_node, "id", None)])
+      if not relation_type or not source_node_id or not target_node_id:
+        continue
+      key = (source_node_id[0], relation_type[0], target_node_id[0])
+      relationship_refs.setdefault(key, set()).update(chunk_refs)
+
+  if entity_refs:
+    entity_batch = [
+      {"node_id": node_id, "chunk_refs": sorted(chunk_refs)}
+      for node_id, chunk_refs in entity_refs.items()
+    ]
+    graph.query(
+      """
+      UNWIND $batch_data AS data
+      MATCH (n)
+      WHERE n.id = data.node_id AND NOT n:Chunk AND NOT n:Document
+      WITH n, data
+      OPTIONAL MATCH (c:Chunk)
+      WHERE c.id IN data.chunk_refs
+      WITH n, data,
+           [source_ref IN collect(DISTINCT c.source_id)
+            WHERE source_ref IS NOT NULL AND source_ref <> ""] AS discovered_source_refs
+      SET n.chunk_refs = reduce(
+            refs = [], ref IN coalesce(n.chunk_refs, []) + data.chunk_refs |
+            CASE WHEN ref IS NULL OR ref = "" OR ref IN refs THEN refs ELSE refs + ref END
+          ),
+          n.source_refs = reduce(
+            refs = [], ref IN coalesce(n.source_refs, []) + discovered_source_refs |
+            CASE WHEN ref IS NULL OR ref = "" OR ref IN refs THEN refs ELSE refs + ref END
+          )
+      """,
+      {"batch_data": entity_batch},
+      session_params={"database": getattr(graph, "_database", None)},
+    )
+
+  if relationship_refs:
+    relationship_batch = [
+      {
+        "source_node_id": source_node_id,
+        "relation_type": relation_type,
+        "target_node_id": target_node_id,
+        "chunk_refs": sorted(chunk_refs),
+      }
+      for (source_node_id, relation_type, target_node_id), chunk_refs in relationship_refs.items()
+    ]
+    graph.query(
+      """
+      UNWIND $batch_data AS data
+      MATCH (source)-[r]->(target)
+      WHERE source.id = data.source_node_id
+        AND target.id = data.target_node_id
+        AND type(r) = data.relation_type
+        AND NOT source:Chunk AND NOT source:Document
+        AND NOT target:Chunk AND NOT target:Document
+      WITH r, data
+      OPTIONAL MATCH (c:Chunk)
+      WHERE c.id IN data.chunk_refs
+      WITH r, data,
+           [source_ref IN collect(DISTINCT c.source_id)
+            WHERE source_ref IS NOT NULL AND source_ref <> ""] AS discovered_source_refs
+      SET r.chunk_refs = reduce(
+            refs = [], ref IN coalesce(r.chunk_refs, []) + data.chunk_refs |
+            CASE WHEN ref IS NULL OR ref = "" OR ref IN refs THEN refs ELSE refs + ref END
+          ),
+          r.source_refs = reduce(
+            refs = [], ref IN coalesce(r.source_refs, []) + discovered_source_refs |
+            CASE WHEN ref IS NULL OR ref = "" OR ref IN refs THEN refs ELSE refs + ref END
+          )
+      """,
+      {"batch_data": relationship_batch},
+      session_params={"database": getattr(graph, "_database", None)},
+    )
+
 def create_graph_database_connection(credentials):
     graph = Neo4jGraph(url=credentials.uri, database=credentials.database, username=credentials.userName, password=credentials.password, refresh_schema=False, sanitize=True)    
     return graph
@@ -286,16 +398,20 @@ def save_graphDocuments_in_neo4j(graph: Neo4jGraph, graph_document_list: List[Gr
    while retries < max_retries:
        try:
            graph.add_graph_documents(graph_document_list, baseEntityLabel=True)
+           _bind_graph_document_sources(graph, graph_document_list)
            # Keep the existing Chinese schema while exposing stable English labels
            # used by the Zhiyinxing API/verification queries.
            graph.query(
                """
                MATCH (n)
-               WHERE n:`岗位` OR n:`能力` OR n:`技能` OR n:`知识` OR n:`任务`
-                  OR n:`课程` OR n:`实训` OR n:`工具`
+               WHERE n:`产业链` OR n:`岗位群` OR n:`岗位` OR n:`任务` OR n:`能力`
+                  OR n:`能力单元` OR n:`技能` OR n:`知识` OR n:`课程` OR n:`实训` OR n:`工具`
                SET n.name = coalesce(n.name, n.id)
                FOREACH (_ IN CASE WHEN n:`岗位` THEN [1] ELSE [] END | SET n:Job)
+               FOREACH (_ IN CASE WHEN n:`产业链` THEN [1] ELSE [] END | SET n:IndustryChain)
+               FOREACH (_ IN CASE WHEN n:`岗位群` THEN [1] ELSE [] END | SET n:JobGroup)
                FOREACH (_ IN CASE WHEN n:`能力` THEN [1] ELSE [] END | SET n:Ability)
+               FOREACH (_ IN CASE WHEN n:`能力单元` THEN [1] ELSE [] END | SET n:AbilityUnit)
                FOREACH (_ IN CASE WHEN n:`技能` THEN [1] ELSE [] END | SET n:Skill)
                FOREACH (_ IN CASE WHEN n:`知识` THEN [1] ELSE [] END | SET n:Knowledge)
                FOREACH (_ IN CASE WHEN n:`任务` THEN [1] ELSE [] END | SET n:Task)

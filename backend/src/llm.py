@@ -222,7 +222,8 @@ async def get_graph_document_list(
     max_attempts = 3
     retry_instructions = (
         "\n空图重试要求：必须至少抽取 1 个岗位节点，并必须抽取能力节点；"
-        "尽可能抽取任务、知识、技能、课程、工具、实训；节点类型只能来自 allowed_nodes；"
+        "如果请求上下文提供产业链或岗位群，按上下文抽取对应节点；"
+        "尽可能抽取任务、能力单元、知识、技能、课程、工具、实训；节点类型只能来自 allowed_nodes；"
         "关系只能来自 allowed_relationships；不允许返回空图。"
     )
     try:
