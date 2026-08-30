@@ -43,6 +43,7 @@ from src.main import (
 )
 from src.neighbours import get_neighbour_nodes
 from src.job_graph_query import JobNotFoundError, query_job_graph
+from src.job_graph_audit import audit_job_graph
 from src.post_processing import create_entity_embedding, create_vector_fulltext_indexes, graph_schema_consolidation
 from src.ragas_eval import get_additional_metrics, get_ragas_metrics
 from src.shared.common_fn import formatted_time, get_value_from_env, get_remaining_token_limits, get_user_embedding_model, change_user_embedding_model
@@ -807,6 +808,22 @@ async def job_graph(jobName: str = Query(..., min_length=1)):
     except Exception:
         logging.exception("Unable to query job graph")
         raise HTTPException(status_code=500, detail="Unable to query job graph")
+
+
+@app.get("/admin/job-graph-audit")
+async def job_graph_audit(jobName: str = Query(..., min_length=1)):
+    """Read-only audit of a job's capability subgraph and shared references."""
+    credentials = _env_neo4j_credentials()
+    credentials.validate_required()
+    try:
+        return await asyncio.to_thread(audit_job_graph, credentials, jobName.strip())
+    except JobNotFoundError:
+        raise HTTPException(status_code=404, detail="Job not found")
+    except HTTPException:
+        raise
+    except Exception:
+        logging.exception("Unable to audit job graph")
+        raise HTTPException(status_code=500, detail="Unable to audit job graph")
     
 
 @app.post("/chat_history")
