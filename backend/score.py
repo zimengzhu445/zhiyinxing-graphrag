@@ -12,7 +12,7 @@ from typing import List
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi_health import health
@@ -42,6 +42,7 @@ from src.main import (
     manually_cancelled_job, populate_graph_schema_from_text, set_status_retry, update_graph, upload_file
 )
 from src.neighbours import get_neighbour_nodes
+from src.job_graph_query import JobNotFoundError, query_job_graph
 from src.post_processing import create_entity_embedding, create_vector_fulltext_indexes, graph_schema_consolidation
 from src.ragas_eval import get_additional_metrics, get_ragas_metrics
 from src.shared.common_fn import formatted_time, get_value_from_env, get_remaining_token_limits, get_user_embedding_model, change_user_embedding_model
@@ -790,6 +791,22 @@ async def graph_query(
         return create_api_response(job_status, message=message, error="Internal server error")
     finally:
         gc.collect()
+
+
+@app.get("/job-graph")
+async def job_graph(jobName: str = Query(..., min_length=1)):
+    """Return the complete capability subgraph for a job name from Neo4j."""
+    credentials = _env_neo4j_credentials()
+    credentials.validate_required()
+    try:
+        return await asyncio.to_thread(query_job_graph, credentials, jobName.strip())
+    except JobNotFoundError:
+        raise HTTPException(status_code=404, detail="Job not found")
+    except HTTPException:
+        raise
+    except Exception:
+        logging.exception("Unable to query job graph")
+        raise HTTPException(status_code=500, detail="Unable to query job graph")
     
 
 @app.post("/chat_history")
