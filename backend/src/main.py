@@ -553,7 +553,12 @@ async def processing_source(credentials, params, pages, merged_file_path=None, i
           break
         else:
           processing_chunks_start_time = time.time()
-          node_count,rel_count,latency_processed_chunk,token_usage = await processing_chunks(selected_chunks,graph,credentials,params.file_name,params.model,params.allowedNodes,params.allowedRelationship,params.chunks_to_combine,node_count, rel_count, params.additional_instructions, params.embedding_provider, params.embedding_model)
+          node_count,rel_count,latency_processed_chunk,token_usage = await processing_chunks(
+            selected_chunks, graph, credentials, params.file_name, params.model,
+            params.allowedNodes, params.allowedRelationship, params.chunks_to_combine,
+            node_count, rel_count, params.additional_instructions, params.embedding_provider,
+            params.embedding_model, enable_zhiyinxing_normalization=getattr(params, "process_all_chunks", False)
+          )
           logging.info("Token used in processing chunks: %s", token_usage)
           tokens_per_file += token_usage
           logging.info("Total token used per file: %s", tokens_per_file)
@@ -654,7 +659,11 @@ async def processing_source(credentials, params, pages, merged_file_path=None, i
     logging.error(error_message)
     raise LLMGraphBuilderException(error_message)
 
-async def processing_chunks(chunkId_chunkDoc_list,graph,credentials,file_name,model,allowedNodes,allowedRelationship, chunks_to_combine, node_count, rel_count, additional_instructions, embedding_provider, embedding_model):
+async def processing_chunks(
+    chunkId_chunkDoc_list, graph, credentials, file_name, model, allowedNodes,
+    allowedRelationship, chunks_to_combine, node_count, rel_count, additional_instructions,
+    embedding_provider, embedding_model, enable_zhiyinxing_normalization=False
+):
   #create vector index and update chunk node with embedding
   latency_processing_chunk = {}
   if graph is not None:
@@ -689,7 +698,7 @@ async def processing_chunks(chunkId_chunkDoc_list,graph,credentials,file_name,mo
     )
 
   cleaned_graph_documents = handle_backticks_nodes_relationship_id_type(graph_documents)
-  if getattr(params, "process_all_chunks", False):
+  if enable_zhiyinxing_normalization:
     cleaned_graph_documents = normalize_zhiyinxing_graph_documents(cleaned_graph_documents)
   cleaned_nodes = sum(len(getattr(doc, "nodes", []) or []) for doc in cleaned_graph_documents)
   cleaned_relationships = sum(len(getattr(doc, "relationships", []) or []) for doc in cleaned_graph_documents)
