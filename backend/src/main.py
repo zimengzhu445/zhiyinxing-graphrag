@@ -36,7 +36,8 @@ from src.make_relationships import (
 from src.shared.common_fn import (
     check_url_source, create_gcs_bucket_folder_name_hashed, create_graph_database_connection,
     delete_uploaded_local_file, fetch_public_url, get_chunk_and_graphDocument, get_value_from_env,
-    handle_backticks_nodes_relationship_id_type, last_url_segment, save_graphDocuments_in_neo4j, track_token_usage
+    handle_backticks_nodes_relationship_id_type, last_url_segment, normalize_zhiyinxing_graph_documents,
+    save_graphDocuments_in_neo4j, track_token_usage
 )
 from src.shared.constants import (
     DELETE_ENTITIES_AND_START_FROM_BEGINNING, QUERY_TO_DELETE_EXISTING_ENTITIES,
@@ -482,6 +483,7 @@ async def processing_source(credentials, params, pages, merged_file_path=None, i
       params.source_id,
       params.source_metadata_type,
       params.source_title,
+      getattr(params, "process_all_chunks", False),
   )
   end_get_chunkId_chunkDoc_list = time.time()
   elapsed_get_chunkId_chunkDoc_list = end_get_chunkId_chunkDoc_list - start_get_chunkId_chunkDoc_list
@@ -687,6 +689,8 @@ async def processing_chunks(chunkId_chunkDoc_list,graph,credentials,file_name,mo
     )
 
   cleaned_graph_documents = handle_backticks_nodes_relationship_id_type(graph_documents)
+  if getattr(params, "process_all_chunks", False):
+    cleaned_graph_documents = normalize_zhiyinxing_graph_documents(cleaned_graph_documents)
   cleaned_nodes = sum(len(getattr(doc, "nodes", []) or []) for doc in cleaned_graph_documents)
   cleaned_relationships = sum(len(getattr(doc, "relationships", []) or []) for doc in cleaned_graph_documents)
   logging.info("Extracted nodes after normalization: %d", cleaned_nodes)
@@ -731,6 +735,7 @@ def get_chunkId_chunkDoc_list(
   source_id=None,
   source_type=None,
   source_title=None,
+  process_all_chunks=False,
 ):
   """
   Get chunk IDs and corresponding document chunks for a file.
@@ -759,7 +764,9 @@ def get_chunkId_chunkDoc_list(
           text = text.replace(j, '')
       pages[i]=Document(page_content=str(text), metadata=pages[i].metadata)
     create_chunks_obj = CreateChunksofDocument(pages, graph)
-    chunks = create_chunks_obj.split_file_into_chunks(token_chunk_size, chunk_overlap, email)
+    chunks = create_chunks_obj.split_file_into_chunks(
+      token_chunk_size, chunk_overlap, email, process_all_chunks=process_all_chunks
+    )
     chunkId_chunkDoc_list = create_relation_between_chunks(
       graph,
       file_name,

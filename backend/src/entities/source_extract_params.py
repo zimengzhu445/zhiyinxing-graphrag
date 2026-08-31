@@ -28,6 +28,7 @@ class SourceScanExtractParams(BaseModel):
     additional_instructions: Optional[str] = Field(None, description="Additional instructions")
     embedding_provider: Optional[str] = Field(None, description="Embedding provider")
     embedding_model: Optional[str] = Field(None, description="Embedding model")
+    process_all_chunks: bool = Field(False, description="Process all chunks for domain-specific pipelines")
 
 def get_source_scan_extract_params(
     source_url: Optional[str] = Form(None),

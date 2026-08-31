@@ -367,6 +367,7 @@ async def build_graph_for_zhiyinxing(
         "all-MiniLM-L6-v2",
         str,
     ),
+    process_all_chunks=True,
     )
 
     try:

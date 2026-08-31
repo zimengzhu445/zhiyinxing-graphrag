@@ -30,6 +30,58 @@ from langchain_core.callbacks import BaseCallbackHandler
 _embedding_instances = {}
 _embedding_locks = {}
 
+_ZHIYINXING_CORE_TYPES = {"岗位", "任务", "能力", "能力单元", "技能", "知识"}
+_ZHIYINXING_TECH_ALIASES = {
+    "python": "Python",
+    "rag": "RAG",
+    "llm": "LLM",
+    "fastapi": "FastAPI",
+    "docker": "Docker",
+    "k8s": "Kubernetes",
+    "kubernetes": "Kubernetes",
+}
+_ZHIYINXING_JOB_ALIASES = {
+    "ai应用开发工程师": "人工智能应用开发工程师",
+    "ai 应用开发工程师": "人工智能应用开发工程师",
+    "人工智能应用开发": "人工智能应用开发工程师",
+    "人工智能应用开发工程师": "人工智能应用开发工程师",
+}
+
+
+def normalize_zhiyinxing_name(value: str) -> str:
+    value = re.sub(r"\s+", " ", str(value or "").strip())
+    value = value.replace("（", "(").replace("）", ")")
+    value = re.sub(r"\s*([()])\s*", r"\1", value)
+    lowered = value.lower()
+    if lowered in _ZHIYINXING_JOB_ALIASES:
+        return _ZHIYINXING_JOB_ALIASES[lowered]
+    if lowered in _ZHIYINXING_TECH_ALIASES:
+        return _ZHIYINXING_TECH_ALIASES[lowered]
+    for alias, canonical in sorted(_ZHIYINXING_TECH_ALIASES.items(), key=lambda item: -len(item[0])):
+        value = re.sub(rf"(?<![A-Za-z0-9]){re.escape(alias)}(?![A-Za-z0-9])", canonical, value, flags=re.IGNORECASE)
+    return value
+
+
+def normalize_zhiyinxing_graph_documents(graph_document_list: List[GraphDocument]):
+    for graph_document in graph_document_list:
+        for node in getattr(graph_document, "nodes", []) or []:
+            if str(getattr(node, "type", "")).strip() not in _ZHIYINXING_CORE_TYPES:
+                continue
+            properties = getattr(node, "properties", None) or {}
+            canonical = normalize_zhiyinxing_name(properties.get("name") or getattr(node, "id", ""))
+            if canonical:
+                node.id = canonical
+                if getattr(node, "properties", None) is not None:
+                    node.properties["name"] = canonical
+        for relationship in getattr(graph_document, "relationships", []) or []:
+            for endpoint in (getattr(relationship, "source", None), getattr(relationship, "target", None)):
+                if endpoint is None or str(getattr(endpoint, "type", "")).strip() not in _ZHIYINXING_CORE_TYPES:
+                    continue
+                endpoint.id = normalize_zhiyinxing_name(getattr(endpoint, "id", ""))
+                if getattr(endpoint, "properties", None) is not None:
+                    endpoint.properties["name"] = endpoint.id
+    return graph_document_list
+
 
 def _canonical_sentence_transformer_model_name(model_name: str) -> str:
     """Map short aliases to canonical Hugging Face sentence-transformer IDs."""

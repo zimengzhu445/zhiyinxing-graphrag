@@ -26,7 +26,7 @@ class CreateChunksofDocument:
         self.pages = pages
         self.graph = graph
 
-    def split_file_into_chunks(self, token_chunk_size: int, chunk_overlap: int, email: str):
+    def split_file_into_chunks(self, token_chunk_size: int, chunk_overlap: int, email: str, process_all_chunks: bool = False):
         """
         Split a list of documents (pages) into chunks of fixed token size.
 
@@ -75,7 +75,7 @@ class CreateChunksofDocument:
             chunk.page_content = re.sub(r'\s+', ' ', chunk.page_content).strip()
 
         logging.info('Total chunks created: %d', len(chunks))
-        if not is_neo4j_user and len(chunks) > chunk_to_be_created:
+        if not process_all_chunks and not is_neo4j_user and len(chunks) > chunk_to_be_created:
             chunks = chunks[:chunk_to_be_created]
             logging.info('Non Neo4j user - limiting chunks to %d from %d', chunk_to_be_created, len(chunks))
 
