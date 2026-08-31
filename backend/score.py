@@ -810,6 +810,45 @@ async def job_graph(jobName: str = Query(..., min_length=1)):
         raise HTTPException(status_code=500, detail="Unable to query job graph")
 
 
+def _job_graph_agent_result(graph_result: dict) -> str:
+    """Format an existing Neo4j job graph result without adding any new facts."""
+    def names(items: list[dict]) -> str:
+        values = [str(item.get("name") or "").strip() for item in (items or [])]
+        values = list(dict.fromkeys(value for value in values if value))
+        return "、".join(values) if values else "暂无数据"
+
+    job = graph_result.get("job") or {}
+    job_name = str(job.get("name") or "").strip() or "暂无数据"
+    sections = (
+        ("目标岗位", job_name),
+        ("产业链", names(graph_result.get("industry_chain"))),
+        ("职业岗位群", names(graph_result.get("job_group"))),
+        ("典型工作任务", names(graph_result.get("tasks"))),
+        ("岗位能力", names(graph_result.get("abilities"))),
+        ("能力单元", names(graph_result.get("ability_units"))),
+        ("技能点", names(graph_result.get("skills"))),
+        ("知识点", names(graph_result.get("knowledge"))),
+    )
+    return "\n".join(f"【{title}】\n{content}" for title, content in sections)
+
+
+@app.get("/job-graph-agent")
+async def job_graph_agent(jobName: str = Query(..., min_length=1)):
+    """Return an agent-friendly textual view of a Neo4j job capability graph."""
+    credentials = _env_neo4j_credentials()
+    credentials.validate_required()
+    try:
+        graph_result = await asyncio.to_thread(query_job_graph, credentials, jobName.strip())
+        return {"result": _job_graph_agent_result(graph_result)}
+    except JobNotFoundError:
+        raise HTTPException(status_code=404, detail="Job not found")
+    except HTTPException:
+        raise
+    except Exception:
+        logging.exception("Unable to query agent-friendly job graph")
+        raise HTTPException(status_code=500, detail="Unable to query job graph")
+
+
 @app.get("/admin/job-graph-audit")
 async def job_graph_audit(jobName: str = Query(..., min_length=1)):
     """Read-only audit of a job's capability subgraph and shared references."""
