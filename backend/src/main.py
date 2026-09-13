@@ -47,6 +47,7 @@ from src.shared.constants import (
 )
 from src.shared.llm_graph_builder_exception import LLMGraphBuilderException
 from src.shared.schema_extraction import schema_extraction_from_text
+from src.zhiyinxing_graph import augment_graph_documents as _augment_zhiyinxing_graph_documents
 
 from bs4 import BeautifulSoup
 
@@ -557,7 +558,11 @@ async def processing_source(credentials, params, pages, merged_file_path=None, i
             selected_chunks, graph, credentials, params.file_name, params.model,
             params.allowedNodes, params.allowedRelationship, params.chunks_to_combine,
             node_count, rel_count, params.additional_instructions, params.embedding_provider,
-            params.embedding_model, enable_zhiyinxing_normalization=getattr(params, "process_all_chunks", False)
+            params.embedding_model,
+            enable_zhiyinxing_normalization=getattr(params, "process_all_chunks", False),
+            industry_chain=getattr(params, "industry_chain", None),
+            professional_group=getattr(params, "professional_group", None),
+            job_name=getattr(params, "job_name", None)
           )
           logging.info("Token used in processing chunks: %s", token_usage)
           tokens_per_file += token_usage
@@ -662,7 +667,8 @@ async def processing_source(credentials, params, pages, merged_file_path=None, i
 async def processing_chunks(
     chunkId_chunkDoc_list, graph, credentials, file_name, model, allowedNodes,
     allowedRelationship, chunks_to_combine, node_count, rel_count, additional_instructions,
-    embedding_provider, embedding_model, enable_zhiyinxing_normalization=False
+    embedding_provider, embedding_model, enable_zhiyinxing_normalization=False,
+    industry_chain=None, professional_group=None, job_name=None
 ):
   #create vector index and update chunk node with embedding
   latency_processing_chunk = {}
@@ -700,6 +706,9 @@ async def processing_chunks(
   cleaned_graph_documents = handle_backticks_nodes_relationship_id_type(graph_documents)
   if enable_zhiyinxing_normalization:
     cleaned_graph_documents = normalize_zhiyinxing_graph_documents(cleaned_graph_documents)
+    _augment_zhiyinxing_graph_documents(
+        cleaned_graph_documents, industry_chain, professional_group, job_name
+    )
   cleaned_nodes = sum(len(getattr(doc, "nodes", []) or []) for doc in cleaned_graph_documents)
   cleaned_relationships = sum(len(getattr(doc, "relationships", []) or []) for doc in cleaned_graph_documents)
   logging.info("Extracted nodes after normalization: %d", cleaned_nodes)
@@ -732,6 +741,7 @@ async def processing_chunks(
   node_count = count_response[file_name].get('nodeCount',"0")
   rel_count = count_response[file_name].get('relationshipCount',"0")
   return node_count,rel_count,latency_processing_chunk,token_usage
+
 
 def get_chunkId_chunkDoc_list(
   graph,

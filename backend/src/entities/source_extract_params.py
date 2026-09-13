@@ -29,6 +29,9 @@ class SourceScanExtractParams(BaseModel):
     embedding_provider: Optional[str] = Field(None, description="Embedding provider")
     embedding_model: Optional[str] = Field(None, description="Embedding model")
     process_all_chunks: bool = Field(False, description="Process all chunks for domain-specific pipelines")
+    industry_chain: Optional[str] = Field(None, description="Zhiyinxing industry chain context")
+    professional_group: Optional[str] = Field(None, description="Zhiyinxing professional group context")
+    job_name: Optional[str] = Field(None, description="Zhiyinxing job name context")
 
 def get_source_scan_extract_params(
     source_url: Optional[str] = Form(None),

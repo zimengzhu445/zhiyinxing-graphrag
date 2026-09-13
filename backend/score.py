@@ -18,6 +18,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi_health import health
 from google.oauth2.credentials import Credentials
 from langchain_neo4j import Neo4jGraph
+from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -44,6 +45,8 @@ from src.main import (
 from src.neighbours import get_neighbour_nodes
 from src.job_graph_query import JobNotFoundError, query_job_graph
 from src.job_graph_audit import audit_job_graph
+from src.services.job_evidence_graph_builder import build_job_graph_from_evidence
+from src.services.job_retriever import get_job_data_status, retrieve_job_evidence
 from src.post_processing import create_entity_embedding, create_vector_fulltext_indexes, graph_schema_consolidation
 from src.ragas_eval import get_additional_metrics, get_ragas_metrics
 from src.shared.common_fn import formatted_time, get_value_from_env, get_remaining_token_limits, get_user_embedding_model, change_user_embedding_model
@@ -148,6 +151,12 @@ app.add_middleware(
 )
 app.add_middleware(SessionMiddleware, secret_key=os.urandom(24))
 app.add_api_route("/health", health([healthy_condition, healthy]))
+
+
+class BuildJobGraphRequest(BaseModel):
+    jobName: str = Field(..., min_length=1)
+    evidenceLimit: int = Field(50, ge=1, le=100)
+    model: str = Field("deepseek_v4_flash", min_length=1)
 
 
 def _env_neo4j_credentials() -> Neo4jCredentials:
@@ -286,11 +295,13 @@ ZHIYINXING_SCHEMA_INSTRUCTIONS = """
 2. “用户登录接口测试”“测试方案设计”“缺陷提交”等具体工作活动归为“任务”或“实训”。
 3. 任务必须表示材料中真实存在的工作活动，而不是抽象能力或任职要求。
 4. 能力表示完成一类工作任务所需的综合能力；能力单元表示可以进一步教学、训练和评价的具体能力。
-5. 不要创建“掌握”“需要掌握”等新的关系名称，只使用规定的关系类型。
-6. 不要创建允许范围之外的业务节点类型。
-7. 不要为了补全图谱凭空捏造输入材料中不存在的信息。
-8. 同一概念尽量统一名称，避免生成同义重复节点。
-9. 如果请求上下文没有提供产业链或岗位群，不得从单份企业材料猜测或杜撰它们。
+5. 技能是具体工具、技术、操作方法或工程实践；知识是材料明确支持的概念、原理、机制、理论、协议或方法论（如向量检索原理、Embedding原理、大语言模型基础、HTTP协议）。只有原始证据明确提及时才抽取知识，不能为补全层级而编造。
+6. 能力单元必须比一级能力更细，避免与岗位能力生成完全同义名称。
+7. 不要创建“掌握”“需要掌握”等新的关系名称，只使用规定的关系类型。
+8. 不要创建允许范围之外的业务节点类型。
+9. 不要为了补全图谱凭空捏造输入材料中不存在的信息。
+10. 同一概念尽量统一名称，避免生成同义重复节点。
+11. 如果请求上下文没有提供产业链或岗位群，不得从单份企业材料猜测或杜撰它们。
 """
 
 @app.post("/build-graph")
@@ -368,6 +379,9 @@ async def build_graph_for_zhiyinxing(
         str,
     ),
     process_all_chunks=True,
+    industry_chain=industryChain,
+    professional_group=professionalGroup,
+    job_name=jobName,
     )
 
     try:
@@ -793,6 +807,47 @@ async def graph_query(
         return create_api_response(job_status, message=message, error="Internal server error")
     finally:
         gc.collect()
+
+
+@app.get("/job-data-status")
+async def job_data_status():
+    """Return runtime status for the local core recruitment CSV index."""
+    return get_job_data_status()
+
+
+@app.get("/job-evidence")
+async def job_evidence(
+    jobName: str = Query(..., min_length=1),
+    limit: int = Query(100, ge=1, le=300),
+):
+    """Retrieve real recruitment evidence from the 13,959-row core job CSV."""
+    try:
+        return await asyncio.to_thread(retrieve_job_evidence, jobName.strip(), limit)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    except Exception:
+        logging.exception("Unable to retrieve job evidence")
+        raise HTTPException(status_code=500, detail="Unable to retrieve job evidence")
+
+
+@app.post("/build-job-graph")
+async def build_job_graph(request: BuildJobGraphRequest):
+    """Build a Neo4j job capability subgraph from real JobEvidence records."""
+    credentials = _env_neo4j_credentials()
+    credentials.validate_required()
+    try:
+        return await build_job_graph_from_evidence(
+            credentials,
+            request.jobName.strip(),
+            MERGED_DIR,
+            model=request.model,
+            evidence_limit=request.evidenceLimit,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    except Exception:
+        logging.exception("Unable to build job graph from JobEvidence")
+        raise HTTPException(status_code=500, detail="Unable to build job graph from JobEvidence")
 
 
 @app.get("/job-graph")

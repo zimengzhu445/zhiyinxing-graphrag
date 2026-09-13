@@ -24,43 +24,12 @@ from pathlib import Path
 import boto3
 from langchain_community.embeddings import BedrockEmbeddings
 from langchain_core.callbacks import BaseCallbackHandler
+from src.zhiyinxing_graph import CORE_TYPES as _ZHIYINXING_CORE_TYPES, normalize_name as normalize_zhiyinxing_name
 
 
 # --- Embedding Model Helpers ---
 _embedding_instances = {}
 _embedding_locks = {}
-
-_ZHIYINXING_CORE_TYPES = {"岗位", "任务", "能力", "能力单元", "技能", "知识"}
-_ZHIYINXING_TECH_ALIASES = {
-    "python": "Python",
-    "rag": "RAG",
-    "llm": "LLM",
-    "fastapi": "FastAPI",
-    "docker": "Docker",
-    "k8s": "Kubernetes",
-    "kubernetes": "Kubernetes",
-}
-_ZHIYINXING_JOB_ALIASES = {
-    "ai应用开发工程师": "人工智能应用开发工程师",
-    "ai 应用开发工程师": "人工智能应用开发工程师",
-    "人工智能应用开发": "人工智能应用开发工程师",
-    "人工智能应用开发工程师": "人工智能应用开发工程师",
-}
-
-
-def normalize_zhiyinxing_name(value: str) -> str:
-    value = re.sub(r"\s+", " ", str(value or "").strip())
-    value = value.replace("（", "(").replace("）", ")")
-    value = re.sub(r"\s*([()])\s*", r"\1", value)
-    lowered = value.lower()
-    if lowered in _ZHIYINXING_JOB_ALIASES:
-        return _ZHIYINXING_JOB_ALIASES[lowered]
-    if lowered in _ZHIYINXING_TECH_ALIASES:
-        return _ZHIYINXING_TECH_ALIASES[lowered]
-    for alias, canonical in sorted(_ZHIYINXING_TECH_ALIASES.items(), key=lambda item: -len(item[0])):
-        value = re.sub(rf"(?<![A-Za-z0-9]){re.escape(alias)}(?![A-Za-z0-9])", canonical, value, flags=re.IGNORECASE)
-    return value
-
 
 def normalize_zhiyinxing_graph_documents(graph_document_list: List[GraphDocument]):
     for graph_document in graph_document_list:
